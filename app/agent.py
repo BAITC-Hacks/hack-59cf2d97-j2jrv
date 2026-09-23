@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.reorder_optimizer import build_recommendation_table
+from src.data_split import split_by_time
+from src.reorder_optimizer import build_recommendation_table, evaluate_forecast_quality
 
 
 class ReorderAgent:
@@ -24,6 +25,7 @@ class ReorderAgent:
         self.stockouts_path = Path(stockouts_path) if stockouts_path else self.data_dir / "stockouts.csv"
         self.suppliers_path = Path(suppliers_path) if suppliers_path else self.data_dir / "suppliers.csv"
         self.training_summary: dict[str, object] = {}
+        self.validation_summary: dict[str, object] = {}
 
     def _read_csv(self, path: Path) -> pd.DataFrame:
         if not path.exists():
@@ -46,6 +48,29 @@ class ReorderAgent:
             "articles": sorted(set(sales["article"].tolist() + inventory["article"].tolist() + suppliers["article"].tolist())),
         }
         return self.training_summary
+
+    def validate(self, train_ratio: float = 0.8) -> dict[str, object]:
+        sales = self._read_csv(self.sales_path)
+        inventory = self._read_csv(self.inventory_path)
+        inbound = self._read_csv(self.inbound_path)
+        stockouts = self._read_csv(self.stockouts_path)
+        suppliers = self._read_csv(self.suppliers_path)
+
+        if "date" not in sales.columns:
+            raise ValueError("sales data must contain a 'date' column for train/validation split")
+
+        train, valid = split_by_time(sales, date_col="date", train_ratio=train_ratio)
+        metrics = evaluate_forecast_quality(train, valid, inventory, inbound, stockouts, suppliers)
+        self.validation_summary = {
+            "train_rows": int(len(train)),
+            "validation_rows": int(metrics["validation_rows"]),
+            "train_ratio": float(train_ratio),
+            "actual_total_qty": float(metrics["actual_total_qty"]),
+            "forecast_total_qty": float(metrics["forecast_total_qty"]),
+            "mae": float(metrics["mae"]),
+            "mape": float(metrics["mape"]),
+        }
+        return self.validation_summary
 
     def calculate(self) -> list[dict[str, object]]:
         sales = self._read_csv(self.sales_path)

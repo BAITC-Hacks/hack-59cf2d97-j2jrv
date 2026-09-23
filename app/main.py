@@ -54,16 +54,31 @@ def health() -> dict:
 @app.post("/api/v1/agent/train")
 def train_agent(token: str = Depends(require_token)) -> dict:
     agent = ReorderAgent()
-    return {"token_valid": bool(token), "training_summary": agent.fit()}
+    training_summary = agent.fit()
+    validation_summary = agent.validate()
+    return {
+        "token_valid": bool(token),
+        "training_summary": training_summary,
+        "validation_summary": validation_summary,
+    }
+
+
+@app.post("/api/v1/agent/validate")
+def validate_agent(token: str = Depends(require_token)) -> dict:
+    agent = ReorderAgent()
+    validation_summary = agent.validate()
+    return {"token_valid": bool(token), "validation_summary": validation_summary}
 
 
 @app.post("/api/v1/recommendations/calculate")
 def calculate_recommendations(token: str = Depends(require_token)) -> dict:
     agent = ReorderAgent()
     recommendations = agent.calculate()
+    validation_summary = agent.validate()
     return {
         "token_valid": bool(token),
         "recommendations": recommendations,
+        "validation_summary": validation_summary,
         "ai_summary": build_ai_summary(recommendations),
         "ascii_dashboard": render_ascii_dashboard(recommendations),
     }

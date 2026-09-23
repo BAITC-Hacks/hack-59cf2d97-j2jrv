@@ -4,7 +4,13 @@ import pandas as pd
 
 from app.ai_service import build_ai_summary
 from app.visuals import render_ascii_dashboard
-from src.reorder_optimizer import build_recommendation_table, clean_sales_for_forecast, detect_large_orders
+from src.data_split import split_by_time
+from src.reorder_optimizer import (
+    build_recommendation_table,
+    clean_sales_for_forecast,
+    detect_large_orders,
+    evaluate_forecast_quality,
+)
 
 
 def test_large_order_is_filtered_from_regular_demand():
@@ -47,6 +53,43 @@ def test_stockout_increases_recommendation():
     assert not recommendations.empty
     assert recommendations.loc[0, "recommended_qty"] > 0
     assert recommendations.loc[0, "supplier"] == "MegaParts"
+
+
+def test_time_split_and_validation_metrics():
+    sales = pd.DataFrame(
+        [
+            {"date": "2025-01-01", "article": "EL-100", "client_id": "C001", "qty": 10},
+            {"date": "2025-01-02", "article": "EL-100", "client_id": "C001", "qty": 9},
+            {"date": "2025-01-03", "article": "EL-100", "client_id": "C001", "qty": 11},
+            {"date": "2025-01-04", "article": "EL-100", "client_id": "C001", "qty": 10},
+            {"date": "2025-01-05", "article": "EL-100", "client_id": "C001", "qty": 10},
+            {"date": "2025-01-06", "article": "EL-100", "client_id": "C001", "qty": 12},
+            {"date": "2025-01-07", "article": "EL-100", "client_id": "C001", "qty": 11},
+            {"date": "2025-01-08", "article": "EL-100", "client_id": "C001", "qty": 13},
+            {"date": "2025-01-09", "article": "EL-100", "client_id": "C001", "qty": 14},
+            {"date": "2025-01-10", "article": "EL-100", "client_id": "C001", "qty": 12},
+            {"date": "2025-01-11", "article": "EL-100", "client_id": "C001", "qty": 8},
+            {"date": "2025-01-12", "article": "EL-100", "client_id": "C001", "qty": 9},
+            {"date": "2025-01-13", "article": "EL-100", "client_id": "C001", "qty": 10},
+            {"date": "2025-01-14", "article": "EL-100", "client_id": "C001", "qty": 11},
+            {"date": "2025-01-15", "article": "EL-100", "client_id": "C001", "qty": 10},
+            {"date": "2025-01-16", "article": "EL-100", "client_id": "C001", "qty": 12},
+        ]
+    )
+    sales["date"] = pd.to_datetime(sales["date"])
+    train, valid = split_by_time(sales, date_col="date", train_ratio=0.75)
+    assert len(train) > 0 and len(valid) > 0
+
+    inventory = pd.DataFrame([{"article": "EL-100", "quantity_on_hand": 30}])
+    inbound = pd.DataFrame([{"article": "EL-100", "expected_qty": 0}])
+    stockouts = pd.DataFrame([{"article": "EL-100", "stockout_days": 0, "lost_sales_units": 0}])
+    suppliers = pd.DataFrame([{"article": "EL-100", "supplier": "AlphaParts", "lead_time_days": 7, "min_order_qty": 0}])
+
+    metrics = evaluate_forecast_quality(train, valid, inventory, inbound, stockouts, suppliers)
+    assert metrics["validation_rows"] == len(valid)
+    assert metrics["actual_total_qty"] == valid["qty"].sum()
+    assert metrics["mae"] >= 0
+    assert metrics["mape"] >= 0
 
 
 def test_ai_summary_works_without_openai_key(monkeypatch):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 
@@ -24,6 +26,69 @@ def clean_sales_for_forecast(sales: pd.DataFrame, flagged: pd.DataFrame) -> pd.D
     cleaned = cleaned.merge(excluded.assign(__excluded__=1), on=key_cols, how="left")
     cleaned = cleaned[cleaned["__excluded__"].isna()].drop(columns=["__excluded__"])
     return cleaned.reset_index(drop=True)
+
+
+def evaluate_forecast_quality(
+    train: pd.DataFrame,
+    valid: pd.DataFrame,
+    inventory: pd.DataFrame | None = None,
+    inbound: pd.DataFrame | None = None,
+    stockouts: pd.DataFrame | None = None,
+    suppliers: pd.DataFrame | None = None,
+    article_col: str = "article",
+    qty_col: str = "qty",
+) -> dict[str, float | int]:
+    """Measure forecast quality on a validation window using the training average as the baseline forecast."""
+    if valid.empty:
+        return {
+            "validation_rows": 0,
+            "actual_total_qty": 0.0,
+            "forecast_total_qty": 0.0,
+            "mae": 0.0,
+            "mape": 0.0,
+        }
+
+    work_valid = valid[[article_col, qty_col]].copy()
+    work_valid[qty_col] = pd.to_numeric(work_valid[qty_col], errors="coerce")
+    work_valid = work_valid.dropna(subset=[qty_col]).reset_index(drop=True)
+    if work_valid.empty:
+        return {
+            "validation_rows": 0,
+            "actual_total_qty": 0.0,
+            "forecast_total_qty": 0.0,
+            "mae": 0.0,
+            "mape": 0.0,
+        }
+
+    forecast_values: list[float] = []
+    actual_values: list[float] = []
+    for _, row in work_valid.iterrows():
+        article = row[article_col]
+        article_train = train[train[article_col] == article]
+        base_forecast = float(article_train[qty_col].mean()) if not article_train.empty else 0.0
+        forecast_values.append(base_forecast)
+        actual_values.append(float(row[qty_col]))
+
+    actual_total_qty = sum(actual_values)
+    forecast_total_qty = sum(forecast_values)
+
+    abs_errors = [abs(actual - forecast) for actual, forecast in zip(actual_values, forecast_values)]
+    mae = sum(abs_errors) / len(abs_errors) if abs_errors else 0.0
+
+    mape_values: list[float] = []
+    for actual, forecast in zip(actual_values, forecast_values):
+        if actual == 0:
+            continue
+        mape_values.append(abs((actual - forecast) / actual))
+    mape = (sum(mape_values) / len(mape_values) * 100.0) if mape_values else 0.0
+
+    return {
+        "validation_rows": int(len(work_valid)),
+        "actual_total_qty": float(actual_total_qty),
+        "forecast_total_qty": float(forecast_total_qty),
+        "mae": float(mae),
+        "mape": float(mape),
+    }
 
 
 def build_recommendation_table(

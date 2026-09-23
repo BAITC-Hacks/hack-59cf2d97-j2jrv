@@ -1,104 +1,219 @@
-# EKT Reorder Agent
+﻿# EKT Reorder Agent
 
-This project implements a lightweight procurement recommendation service for warehouse planning. It is designed for the business case of TОО "Электрокомплект" and focuses on realistic inventory logic rather than a heavy frontend.
+## 1. Описание проекта
 
-## Business goal
+Проект представляет собой локальный сервис рекомендаций по закупкам для складского управления. Его цель — помочь специалисту по закупкам быстро оценить, сколько товара необходимо заказать, исключая разовые крупные заказы, которые искажают регулярный спрос. Решение рассчитано на работу с историческими данными по продажам, остаткам на складе, ожидаемым поставкам, дефициту и поставщикам.
 
-The purchasing manager needs a fast way to estimate purchase volumes without overstocking or creating shortages. The service calculates what to order by supplier, explains the logic behind the recommendation, and filters out one-off large orders so they do not distort regular demand.
+Основная задача проекта — не просто сформировать число закупки, а показать логику расчёта: что является регулярной потребностью, какие заказы были аномальными, как учтены страховой запас и потери от дефицита.
 
-## What is included
+## 2. Какая проблема решается
 
-- detection of large one-off orders and removal from regular-demand analysis;
-- calculation of regular demand from historical sales;
-- stockout compensation for lost sales periods;
-- supplier and lead-time weighting;
-- simple ASCII recommendation dashboard;
-- AI-assisted explanation layer using OpenAI when a key is configured.
+Для закупщика и менеджмента важно:
 
-## Methodology
+- не допустить дефицита по критичным позициям;
+- не создавать избыточный запас по товарам, которые в реальности покупаются нерегулярно;
+- учитывать реальные пики спроса без искажения планирования;
+- быстро получать объяснимую рекомендацию по закупке по каждой позиции.
 
-The logic is intentionally transparent and explainable:
+Решение работает в условиях ограниченного фронтенда и рассчитано прежде всего на практическое использование внутри локальной среды, а не на сложную пользовательскую интерфейсную систему.
 
-1. historical sales are cleaned from abnormal spikes;
-2. regular demand is estimated on the remaining sales history;
-3. on-hand stock and inbound quantities are subtracted from the projected need;
-4. lead time and safety stock are added;
-5. stockout-related lost sales are compensated;
-6. the output is grouped by supplier with a short justification.
+## 3. Что реализовано
 
-This follows the core requirement: one-off large orders must not inflate the warehouse replenishment plan.
+В текущей версии проекта реализованы следующие функции:
 
-## Project structure
+- анализ исторических продаж по артикулам;
+- выявление и исключение из расчёта крупных разовых заказов;
+- расчёт базовой регулярной потребности на основе истории продаж;
+- учёт текущего остатка на складе и ожидаемых поставок;
+- учёт страхового запаса и срока поставки;
+- компенсация потерь от дефицита по данным о stockout;
+- формирование рекомендаций по закупкам по каждому артикулу;
+- привязка поставщика и информации о сроках поставки;
+- вывод результатов в виде таблицы и ASCII-дашборда;
+- генерация краткого текста для анализа в формате AI summary, если ключ OpenAI доступен;
+- fallback-описание, если ключ OpenAI отсутствует;
+- API с авторизацией по bearer token;
+- проверка модели и API через тесты.
 
-- `app/` — FastAPI service, config, AI layer and dashboard output
-- `src/` — core reorder optimization algorithm
-- `data/` — sample CSV inputs for tests and demo runs
-- `tests/` — validation of logic, API auth and dashboard output
+## 4. Как работает решение
 
-## Run locally
+Пользовательский сценарий выглядит следующим образом:
+
+1. В проект загружаются данные из CSV-файлов: продажи, остатки, ожидаемые поставки, дефицит и поставщики.
+2. Алгоритм анализирует историю продаж и выделяет аномально крупные заказы.
+3. Эти заказы исключаются из расчёта регулярной потребности, чтобы они не завышали план закупок.
+4. Для оставшихся данных вычисляется средняя регулярная потребность.
+5. К ней добавляется страховой запас и учёт срока поставки.
+6. Из ожидаемой потребности вычитаются текущий остаток и поступления.
+7. Если были периоды дефицита, учитываются потери продаж и добавляется компенсация.
+8. Формируется итоговая таблица рекомендаций по позициям и поставщикам.
+9. Пользователь получает:
+   - JSON-ответ с рекомендациями;
+   - текстовый AI summary;
+   - ASCII-таблицу для быстрого просмотра в терминале или браузере.
+
+## 5. Технологии
+
+В проекте используются следующие технологии и библиотеки:
+
+- Python 3.13 (в окружении разработки)
+- FastAPI — API-сервис
+- Uvicorn — запуск HTTP-сервера
+- Pandas — обработка данных и расчёты
+- NumPy — численные вычисления
+- SQLAlchemy — подготовка к работе с SQL-данными
+- psycopg2-binary — драйвер PostgreSQL
+- python-dotenv — загрузка переменных окружения
+- httpx — HTTP-клиент
+- OpenAI Python SDK — интеграция с OpenAI API, если ключ задан
+- Pytest — тестирование
+
+Также в проекте предусмотрена настройка переменных окружения:
+
+- APP_API_TOKEN
+- POSTGRES_DSN
+- OPENAI_API_KEY
+
+## 6. Архитектура проекта
+
+Структура репозитория следующая:
+
+- [app/__init__.py](app/__init__.py) — пакет приложения
+- [app/agent.py](app/agent.py) — агент логики закупок, обучение и валидация данных
+- [app/config.py](app/config.py) — загрузка переменных окружения
+- [app/main.py](app/main.py) — API-эндпоинты FastAPI
+- [app/ai_service.py](app/ai_service.py) — генерация AI summary и запасной текстовый вариант
+- [app/visuals.py](app/visuals.py) — ASCII-дашборд
+- [src/reorder_optimizer.py](src/reorder_optimizer.py) — основная логика рекомендаций по закупкам
+- [src/data_split.py](src/data_split.py) — разбиение временных данных на train/validation
+- [data/](data/) — CSV-файлы с примером входных данных
+- [sql/schema.sql](sql/schema.sql) — SQL-схема для данных
+- [tests/test_reorder_model.py](tests/test_reorder_model.py) — проверка бизнес-логики и API
+- [main.py](main.py) — точка запуска backend-приложения
+
+### Взаимодействие компонентов
+
+- FastAPI принимает HTTP-запросы.
+- ReorderAgent читает CSV-данные и запускает расчёт.
+- reorder_optimizer вычисляет рекомендации и метрики качества.
+- AI service формирует краткое объяснение.
+- visuals форматирует результаты в ASCII-таблицу.
+- tests проверяют корректность расчётов и API.
+
+## 7. Установка и запуск
+
+### 1) Клонирование и переход в директорию
+
+```bash
+git clone https://github.com/BAITC-Hacks/hack-59cf2d97-j2jrv.git
+cd hack-59cf2d97-j2jrv
+```
+
+### 2) Создание виртуального окружения
 
 ```bash
 python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
 ```
 
-Then open:
+На Windows:
 
-- http://localhost:8000/
-- http://localhost:8000/health
-- http://localhost:8000/docs
-- http://localhost:8000/api/v1/recommendations/ascii
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
-## Authentication
-
-All recommendation endpoints use bearer-token auth.
-
-Default token:
+### 3) Установка зависимостей
 
 ```bash
-change-me-token
+pip install -r requirements.txt
 ```
 
-Override it via `APP_API_TOKEN` in `.env`.
+### 4) Создание файла переменных окружения
 
-## OpenAI configuration
-
-Create a `.env` file in the project root with:
+В корне проекта создайте файл `.env` со следующим содержимым:
 
 ```env
 APP_API_TOKEN=change-me-token
-OPENAI_API_KEY=your_openai_key_here
+OPENAI_API_KEY=
+POSTGRES_DSN=postgresql+psycopg2://postgres:postgres@localhost:5432/ekt
 ```
 
-The app will read the key automatically when available. If the key is missing, the service falls back to a non-AI summary format so the project remains usable.
+Если `OPENAI_API_KEY` не задан, сервис работает в fallback-режиме и возвращает текстовую сводку без вызова OpenAI.
 
-## Simple ASCII dashboard
+### 5) Запуск приложения
 
-The service exposes a textual dashboard that is intentionally minimal and easy to view in a terminal or browser:
-
-```text
-article      | supplier         | recommended_qty  | reason
-------------+------------------+------------------+----------------------------------------
-EL-100       | AlphaParts       | 270.6            | avg_demand=12.0; lead_time=10d...
+```bash
+python main.py
 ```
 
-This keeps the interface very lightweight while still supporting operational review.
+После запуска приложение будет доступно по адресам:
 
-## Validation
+- http://127.0.0.1:8000/
+- http://127.0.0.1:8000/health
+- http://127.0.0.1:8000/docs
+
+## 8. Как проверить решение
+
+### Проверка через Swagger
+
+1. Откройте страницу http://127.0.0.1:8000/docs.
+2. Войдите в любой protected endpoint через Bearer token.
+3. По умолчанию token: `change-me-token`.
+4. Выполните запрос к `/api/v1/recommendations/calculate`.
+5. В ответе вы получите:
+   - `recommendations`
+   - `validation_summary`
+   - `ai_summary`
+   - `ascii_dashboard`
+
+### Проверка через curl
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/recommendations/calculate" \
+  -H "Authorization: Bearer change-me-token"
+```
+
+### Проверка тестами
 
 ```bash
 pytest -q
 ```
 
-Current validation status:
+Согласно текущей проверке репозитория, набор тестов выполняется успешно:
 
-- 4 passed
+- `5 passed in 1.37s`
 
-## Notes
+## 9. Данные и интеграции
 
-- The project is designed for local/demo operation first and can later be deployed to a server or hosting provider.
-- The logic is explainable and suitable for managerial review before approving purchase orders.
-- The design intentionally avoids a heavy frontend, as requested for a simple operational tool.
+### Источники данных
 
+Проект использует CSV-файлы из директории [data/](data/):
+
+- [data/sample_sales.csv](data/sample_sales.csv) — исторические продажи
+- [data/inventory.csv](data/inventory.csv) — остатки на складе
+- [data/inbound.csv](data/inbound.csv) — ожидаемые поставки
+- [data/stockouts.csv](data/stockouts.csv) — данные по дефициту
+- [data/suppliers.csv](data/suppliers.csv) — поставщики и параметры поставки
+
+### Внешние сервисы
+
+- OpenAI API: используется только при наличии валидного `OPENAI_API_KEY`.
+- PostgreSQL: в проекте предусмотрена переменная `POSTGRES_DSN`, но текущая демо-реализация работает через CSV-данные и не использует базу данных как основной источник данных.
+
+## 10. Ограничения текущей версии
+
+Текущая версия проекта имеет ряд ограничений, которые важно учитывать:
+
+- это локальный демо/POC-решение, а не полноценная commercial SaaS-платформа;
+- интерфейс минимальный и рассчитан на понятный терминальный/JSON-вывод, а не на сложный UI;
+- расчёт строится на CSV-данных, используемых в репозитории;
+- для реальных производственных данных потребуются дополнительная валидация, настройка параметров и интеграция с актуальными источниками;
+- PostgreSQL и OpenAI являются подготовленными интеграциями, но основной рабочий сценарий в текущем состоянии проверен на локальных CSV-данных;
+- если ключ OpenAI отсутствует, система работает в fallback-режиме и выдаёт текст без вызова внешнего AI-сервиса.
+
+## 11. Deployed-версия
+
+В текущем репозитории отсутствует настроенный deployed-окружение или конфигурация для публичного развёртывания. На данный момент проект предназначен для локального запуска через FastAPI/Uvicorn и проверки в среде разработчика.
+
+## 12. Итог
+
+Проект реализует практический инструмент для автоматизации рекомендаций по закупкам на основе исторических данных и бизнес-правил. Он ориентирован на прозрачность расчётов, удобство проверки и локальный запуск, что делает его пригодным для демонстрации и дальнейшей доработки под конкретные складские процессы.
