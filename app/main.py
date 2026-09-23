@@ -230,6 +230,47 @@ def index() -> str:
             font-weight: 600;
           }
 
+          .progress-panel {
+            display: none;
+            margin-top: 16px;
+            background: #f8fbfb;
+            border: 1px solid #dfece9;
+            border-radius: 12px;
+            padding: 12px 14px;
+          }
+
+          .progress-labels {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            color: var(--text);
+            font-weight: 700;
+            font-size: 0.93rem;
+            margin-bottom: 8px;
+          }
+
+          .progress-track {
+            width: 100%;
+            height: 12px;
+            background: #e5eceb;
+            border-radius: 999px;
+            overflow: hidden;
+          }
+
+          .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #17a98d 0%, #63c9b7 100%);
+            border-radius: inherit;
+            transition: width 0.35s ease;
+          }
+
+          .progress-note {
+            margin-top: 8px;
+            font-size: 0.86rem;
+            color: var(--muted);
+          }
+
           .metrics {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -364,6 +405,17 @@ def index() -> str:
                 Используйте токен <strong>change-me-token</strong> по умолчанию или задайте свой в переменной <strong>APP_API_TOKEN</strong>.
               </div>
 
+              <div id="progress-panel" class="progress-panel" aria-live="polite">
+                <div class="progress-labels">
+                  <span>Подготовка результата</span>
+                  <span id="progress-percent">0%</span>
+                </div>
+                <div class="progress-track">
+                  <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <div id="progress-note" class="progress-note">Ожидание запуска расчёта…</div>
+              </div>
+
               <div id="error" class="error" aria-live="polite"></div>
               <div id="status" class="status" aria-live="polite"></div>
             </div>
@@ -409,10 +461,57 @@ def index() -> str:
           const submitBtn = document.getElementById('submit-btn');
           const errorBox = document.getElementById('error');
           const statusBox = document.getElementById('status');
+          const progressPanel = document.getElementById('progress-panel');
+          const progressFill = document.getElementById('progress-fill');
+          const progressPercent = document.getElementById('progress-percent');
+          const progressNote = document.getElementById('progress-note');
           const metricsBox = document.getElementById('metrics');
           const aiSummaryBox = document.getElementById('ai-summary');
           const tableBody = document.getElementById('recommendations-body');
           const rawJsonBox = document.getElementById('raw-json');
+
+          let progressTimer = null;
+
+          function updateProgress(percent, text) {
+            const safePercent = Math.min(100, Math.max(0, percent));
+            progressFill.style.width = `${safePercent}%`;
+            progressPercent.textContent = `${safePercent}%`;
+            progressNote.textContent = text;
+          }
+
+          function startProgress() {
+            if (progressTimer) {
+              clearInterval(progressTimer);
+            }
+
+            progressPanel.style.display = 'block';
+            let value = 8;
+            updateProgress(value, 'Сбор и проверка данных…');
+
+            progressTimer = setInterval(() => {
+              const step = 10 + Math.random() * 16;
+              value = Math.min(92, value + step);
+
+              if (value < 35) {
+                updateProgress(value, 'Сбор и фильтрация данных…');
+              } else if (value < 70) {
+                updateProgress(value, 'Анализ спроса и остатков…');
+              } else {
+                updateProgress(value, 'Считаем приоритеты и закупки…');
+              }
+            }, 420);
+          }
+
+          function finishProgress() {
+            if (progressTimer) {
+              clearInterval(progressTimer);
+              progressTimer = null;
+            }
+            updateProgress(100, 'Готово. Результат получен.');
+            setTimeout(() => {
+              progressPanel.style.display = 'none';
+            }, 600);
+          }
 
           function showError(message) {
             errorBox.textContent = message;
@@ -473,7 +572,9 @@ def index() -> str:
             }
 
             submitBtn.disabled = true;
-            statusBox.textContent = 'Расчёт запущен...';
+            clearError();
+            statusBox.textContent = 'Расчёт запущен…';
+            startProgress();
 
             try {
               const response = await fetch('/api/v1/recommendations/calculate', {
@@ -495,9 +596,15 @@ def index() -> str:
               aiSummaryBox.textContent = payload.ai_summary || 'Сводка отсутствует.';
               rawJsonBox.textContent = JSON.stringify(payload, null, 2);
               statusBox.textContent = 'Готово. Данные обновлены.';
+              finishProgress();
             } catch (error) {
               showError(error.message || 'Не удалось выполнить запрос.');
               statusBox.textContent = 'Ошибка';
+              if (progressTimer) {
+                clearInterval(progressTimer);
+                progressTimer = null;
+              }
+              progressPanel.style.display = 'none';
             } finally {
               submitBtn.disabled = false;
             }
