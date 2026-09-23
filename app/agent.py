@@ -24,6 +24,7 @@ class ReorderAgent:
         inbound_path: str | Path | None = None,
         stockouts_path: str | Path | None = None,
         suppliers_path: str | Path | None = None,
+        max_rows: int | None = None,
     ) -> None:
         base_dir = Path(data_dir)
         if str(data_dir) == "data" and (Path("data") / "real").exists():
@@ -36,6 +37,7 @@ class ReorderAgent:
         self.suppliers_path = Path(suppliers_path) if suppliers_path else self.data_dir / "suppliers.csv"
         self.training_summary: dict[str, object] = {}
         self.validation_summary: dict[str, object] = {}
+        self.max_rows = max_rows if max_rows is not None else int(__import__("os").getenv("APP_MAX_ROWS", "200"))
 
     def _has_external_sources(self) -> bool:
         external_roots = [Path(r'd:\download\Systeme electric'), Path(r'd:\download\IEK')]
@@ -54,18 +56,26 @@ class ReorderAgent:
         loader = needs.get(path.name)
         if self._has_external_sources() and loader is not None:
             try:
-                return loader()
+                df = loader()
+                if self.max_rows and len(df) > self.max_rows:
+                    return df.head(self.max_rows).copy()
+                return df
             except (FileNotFoundError, MemoryError, OSError, ValueError):
                 pass
 
         if path.exists():
+            if self.max_rows:
+                return pd.read_csv(path, nrows=self.max_rows)
             return pd.read_csv(path)
 
         if loader is not None:
             for root in external_roots:
                 if root.exists():
                     try:
-                        return loader()
+                        df = loader()
+                        if self.max_rows and len(df) > self.max_rows:
+                            return df.head(self.max_rows).copy()
+                        return df
                     except (FileNotFoundError, MemoryError, OSError, ValueError):
                         continue
         raise FileNotFoundError(f"Expected data file does not exist: {path}")

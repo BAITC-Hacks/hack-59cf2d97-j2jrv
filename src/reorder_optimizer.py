@@ -115,32 +115,38 @@ def build_recommendation_table(
     if cleaned_sales.empty:
         cleaned_sales = sales.copy()
 
-    daily_demand = (
-        cleaned_sales.groupby("article")["qty"].mean().rename("avg_daily_demand").reset_index()
-    )
-
-    inventory_by_article = inventory.groupby("article")["quantity_on_hand"].sum().rename("quantity_on_hand")
-    inbound_by_article = inbound.groupby("article")["expected_qty"].sum().rename("expected_qty")
+    daily_demand = cleaned_sales.groupby("article")["qty"].mean().to_dict()
+    inventory_by_article = inventory.groupby("article")["quantity_on_hand"].sum().to_dict()
+    inbound_by_article = inbound.groupby("article")["expected_qty"].sum().to_dict()
     stockout_by_article = stockouts.groupby("article")[["stockout_days", "lost_sales_units"]].sum()
-    supplier_by_article = suppliers.groupby("article").first()
+    stockout_by_article_dict = {
+        article: {
+            "stockout_days": float(row["stockout_days"]),
+            "lost_sales_units": float(row["lost_sales_units"]),
+        }
+        for article, row in stockout_by_article.iterrows()
+    }
+    supplier_by_article = suppliers.groupby("article").first().to_dict(orient="index")
 
     articles = sorted(set(cleaned_sales["article"].unique()) | set(inventory["article"].unique()) | set(suppliers["article"].unique()))
     rows = []
 
     for article in articles:
-        avg_daily = float(daily_demand.loc[daily_demand["article"] == article, "avg_daily_demand"].sum() if not daily_demand.empty else 0.0)
+        avg_daily = float(daily_demand.get(article, 0.0))
         if avg_daily <= 0:
-            avg_daily = float(cleaned_sales.loc[cleaned_sales["article"] == article, "qty"].mean()) if article in cleaned_sales["article"].unique() else 0.0
+            article_values = cleaned_sales.loc[cleaned_sales["article"] == article, "qty"]
+            avg_daily = float(article_values.mean()) if not article_values.empty else 0.0
 
         on_hand = float(inventory_by_article.get(article, 0.0))
         inbound_qty = float(inbound_by_article.get(article, 0.0))
-        supplier_row = supplier_by_article.loc[article] if article in supplier_by_article.index else None
-        supplier_name = supplier_row["supplier"] if supplier_row is not None and "supplier" in supplier_row else "Unknown"
-        lead_time = int(supplier_row["lead_time_days"]) if supplier_row is not None and "lead_time_days" in supplier_row else 7
-        min_order_qty = float(supplier_row["min_order_qty"]) if supplier_row is not None and "min_order_qty" in supplier_row else 0.0
+        supplier_row = supplier_by_article.get(article)
+        supplier_name = supplier_row.get("supplier") if supplier_row is not None and "supplier" in supplier_row else "Unknown"
+        lead_time = int(supplier_row.get("lead_time_days")) if supplier_row is not None and "lead_time_days" in supplier_row else 7
+        min_order_qty = float(supplier_row.get("min_order_qty")) if supplier_row is not None and "min_order_qty" in supplier_row else 0.0
 
-        stockout_days = float(stockout_by_article.loc[article, "stockout_days"]) if article in stockout_by_article.index else 0.0
-        lost_sales = float(stockout_by_article.loc[article, "lost_sales_units"]) if article in stockout_by_article.index else 0.0
+        stockout_metrics = stockout_by_article_dict.get(article, {"stockout_days": 0.0, "lost_sales_units": 0.0})
+        stockout_days = float(stockout_metrics.get("stockout_days", 0.0))
+        lost_sales = float(stockout_metrics.get("lost_sales_units", 0.0))
 
         seasonal_index = 1.0
         growth = 0.05 if avg_daily > 0 else 0.0

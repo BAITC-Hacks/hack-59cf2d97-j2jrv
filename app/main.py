@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
@@ -22,16 +23,26 @@ from app.config import API_TOKEN
 from app.visuals import render_ascii_dashboard
 
 security = HTTPBearer(auto_error=False)
+_CACHE_EXECUTOR = ThreadPoolExecutor(max_workers=1)
+_CACHE_FUTURE: Future[tuple[list[dict], dict]] | None = None
+
+
+def warm_recommendations_cache() -> Future[tuple[list[dict], dict]] | None:
+    global _CACHE_FUTURE
+    if _CACHE_FUTURE is None or _CACHE_FUTURE.done():
+        _CACHE_FUTURE = _CACHE_EXECUTOR.submit(get_cached_recommendations)
+    return _CACHE_FUTURE
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    get_cached_recommendations()
+    warm_recommendations_cache()
     yield
 
 
 app = FastAPI(title="EKT Reorder Agent", version="1.0.0", lifespan=lifespan)
 MAX_RECOMMENDATIONS = 25
+PREVIEW_MODE = os.getenv("APP_PREVIEW_MODE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 @lru_cache(maxsize=1)
@@ -43,7 +54,18 @@ def get_cached_recommendations() -> tuple[list[dict], dict]:
         key=lambda item: float(item.get("recommended_qty", 0) or 0),
         reverse=True,
     )[:MAX_RECOMMENDATIONS]
+
+    if PREVIEW_MODE:
+        return recommendations, {
+            "mode": "preview",
+            "message": "Preview mode enabled: full validation is skipped to keep the page responsive.",
+            "full_validation_enabled": False,
+            "items_returned": len(recommendations),
+        }
+
     validation_summary = agent.validate()
+    validation_summary["mode"] = "full"
+    validation_summary["full_validation_enabled"] = True
     return recommendations, validation_summary
 
 
@@ -522,6 +544,7 @@ def validate_agent(token: str = Depends(require_token)) -> dict:
 
 @app.post("/api/v1/recommendations/calculate")
 def calculate_recommendations(token: str = Depends(require_token)) -> dict:
+    warm_recommendations_cache()
     recommendations, validation_summary = get_cached_recommendations()
     return {
         "token_valid": bool(token),
@@ -534,5 +557,6 @@ def calculate_recommendations(token: str = Depends(require_token)) -> dict:
 
 @app.get("/api/v1/recommendations/ascii")
 def ascii_dashboard(token: str = Depends(require_token)) -> str:
+    warm_recommendations_cache()
     recommendations, _ = get_cached_recommendations()
     return render_ascii_dashboard(recommendations)
