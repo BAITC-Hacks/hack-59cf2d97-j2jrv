@@ -14,28 +14,34 @@ def _fallback_summary(recommendations: list[dict[str, Any]]) -> str:
     if not recommendations:
         return "Нет рекомендаций для анализа."
 
+    prioritized = sorted(recommendations, key=lambda item: float(item.get("recommended_qty", 0) or 0), reverse=True)
     lines = []
-    for item in recommendations[:5]:
+    for item in prioritized[:3]:
         article = item.get("article", "unknown")
         supplier = item.get("supplier", "unknown")
         qty = item.get("recommended_qty", 0)
-        lines.append(f"{article}: {supplier}, рекомендовано {qty} единиц.")
+        lines.append(f"{article} ({supplier}) — приоритетная закупка: {qty} ед.")
 
-    if len(recommendations) > 5:
-        lines.append(f"И ещё {len(recommendations) - 5} позиций требуют проверки.")
+    if len(prioritized) > 3:
+        lines.append(f"Ещё {len(prioritized) - 3} SKU требуют проверки по запасам и срокам поставки.")
 
     return " ".join(lines)
+
+
+def _has_valid_openai_key() -> bool:
+    value = str(OPENAI_API_KEY or "").strip()
+    return bool(value) and value.startswith("sk-")
 
 
 def build_ai_summary(recommendations: list[dict[str, Any]], model: str = "gpt-4o-mini") -> str:
     if not recommendations:
         return "Нет рекомендаций для ИИ-анализа."
 
-    if not OPENAI_API_KEY or OpenAI is None:
+    if not _has_valid_openai_key() or OpenAI is None:
         return _fallback_summary(recommendations)
 
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = OpenAI(api_key=OPENAI_API_KEY, timeout=10.0, max_retries=0)
         prompt = "\n".join(
             [
                 "Проанализируй эти рекомендации по закупкам и кратко объясни, какое решение наиболее важно для бизнеса. "
@@ -58,6 +64,7 @@ def build_ai_summary(recommendations: list[dict[str, Any]], model: str = "gpt-4o
             ],
             temperature=0.2,
             max_tokens=220,
+            timeout=10.0,
         )
 
         content = response.choices[0].message.content

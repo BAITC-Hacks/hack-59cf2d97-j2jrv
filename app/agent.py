@@ -5,6 +5,13 @@ from pathlib import Path
 import pandas as pd
 
 from src.data_split import split_by_time
+from src.external_data_loader import (
+    load_external_inbound,
+    load_external_inventory,
+    load_external_sales,
+    load_external_stockouts,
+    load_external_suppliers,
+)
 from src.reorder_optimizer import build_recommendation_table, evaluate_forecast_quality
 
 
@@ -18,7 +25,10 @@ class ReorderAgent:
         stockouts_path: str | Path | None = None,
         suppliers_path: str | Path | None = None,
     ) -> None:
-        self.data_dir = Path(data_dir)
+        base_dir = Path(data_dir)
+        if str(data_dir) == "data" and (Path("data") / "real").exists():
+            base_dir = Path("data") / "real"
+        self.data_dir = base_dir
         self.sales_path = Path(sales_path) if sales_path else self.data_dir / "sample_sales.csv"
         self.inventory_path = Path(inventory_path) if inventory_path else self.data_dir / "inventory.csv"
         self.inbound_path = Path(inbound_path) if inbound_path else self.data_dir / "inbound.csv"
@@ -27,10 +37,38 @@ class ReorderAgent:
         self.training_summary: dict[str, object] = {}
         self.validation_summary: dict[str, object] = {}
 
+    def _has_external_sources(self) -> bool:
+        external_roots = [Path(r'd:\download\Systeme electric'), Path(r'd:\download\IEK')]
+        return any(root.exists() for root in external_roots)
+
     def _read_csv(self, path: Path) -> pd.DataFrame:
-        if not path.exists():
-            raise FileNotFoundError(f"Expected data file does not exist: {path}")
-        return pd.read_csv(path)
+        external_roots = [Path(r'd:\download\Systeme electric'), Path(r'd:\download\IEK')]
+        needs = {
+            self.sales_path.name: load_external_sales,
+            self.inventory_path.name: load_external_inventory,
+            self.inbound_path.name: load_external_inbound,
+            self.stockouts_path.name: load_external_stockouts,
+            self.suppliers_path.name: load_external_suppliers,
+        }
+
+        loader = needs.get(path.name)
+        if self._has_external_sources() and loader is not None:
+            try:
+                return loader()
+            except (FileNotFoundError, MemoryError, OSError, ValueError):
+                pass
+
+        if path.exists():
+            return pd.read_csv(path)
+
+        if loader is not None:
+            for root in external_roots:
+                if root.exists():
+                    try:
+                        return loader()
+                    except (FileNotFoundError, MemoryError, OSError, ValueError):
+                        continue
+        raise FileNotFoundError(f"Expected data file does not exist: {path}")
 
     def fit(self) -> dict[str, object]:
         sales = self._read_csv(self.sales_path)

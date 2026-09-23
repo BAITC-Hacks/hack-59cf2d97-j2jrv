@@ -92,6 +92,27 @@ def test_time_split_and_validation_metrics():
     assert metrics["mape"] >= 0
 
 
+def test_ai_summary_skips_invalid_openai_key(monkeypatch):
+    monkeypatch.setattr("app.ai_service.OPENAI_API_KEY", "placeholder-key", raising=False)
+    called = {"value": False}
+
+    class FakeClient:
+        @property
+        def chat(self):
+            called["value"] = True
+            raise AssertionError("OpenAI should not be called for placeholder keys")
+
+    monkeypatch.setattr("app.ai_service.OpenAI", lambda *args, **kwargs: FakeClient(), raising=False)
+
+    summary = build_ai_summary([
+        {"article": "EL-100", "supplier": "AlphaParts", "recommended_qty": 100, "estimated_demand": 80},
+        {"article": "EL-200", "supplier": "MegaParts", "recommended_qty": 70, "estimated_demand": 60},
+    ])
+    assert not called["value"]
+    assert "EL-100" in summary
+    assert "AlphaParts" in summary
+
+
 def test_ai_summary_works_without_openai_key(monkeypatch):
     monkeypatch.setattr("app.ai_service.OPENAI_API_KEY", "", raising=False)
     summary = build_ai_summary([
@@ -111,3 +132,23 @@ def test_ascii_dashboard_renders_table():
     assert "EL-100" in dashboard
     assert "AlphaParts" in dashboard
     assert "recommended_qty" in dashboard.lower()
+
+
+def test_agent_prefers_external_data_when_available(monkeypatch, tmp_path):
+    local_csv = tmp_path / "sample_sales.csv"
+    local_csv.write_text("date,article,qty\n2025-01-01,LOCAL_ONLY,5\n", encoding="utf-8")
+
+    import pandas as pd
+
+    from app.agent import ReorderAgent
+
+    expected = pd.DataFrame([{"date": "2025-01-01", "article": "EXCEL_ONLY", "qty": 7}])
+
+    monkeypatch.setattr(ReorderAgent, "_has_external_sources", lambda self: True)
+    monkeypatch.setattr("app.agent.load_external_sales", lambda: expected)
+
+    agent = ReorderAgent(data_dir=tmp_path)
+    data = agent._read_csv(agent.sales_path)
+
+    assert data.equals(expected)
+    assert set(data["article"]) == {"EXCEL_ONLY"}
